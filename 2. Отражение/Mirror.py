@@ -1,417 +1,224 @@
-import sys
-import importlib.resources
-import numpy as np
-from PIL import Image, ImageFilter, ImageEnhance
-from PyQt5.QtWidgets import (
-    QApplication, QMainWindow, QLabel, QPushButton, QFileDialog,
-    QVBoxLayout, QWidget, QScrollArea, QHBoxLayout
-)
-from PyQt5.QtGui import QPixmap, QImage
-from PyQt5.QtCore import Qt
+import tkinter as tk
+from tkinter import filedialog, messagebox
+from PIL import Image, ImageTk, ImageDraw
+import math
 
 
-class ImageLoaderApp(QMainWindow):
-    def __init__(self):
-        super().__init__()
-        self.setWindowTitle("Filters")
-        self.setGeometry(300, 300, 900, 600)
-        self.setStyleSheet('background-color: #29272E;')
+class ImageReflectionApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Mirror")
+        self.root.configure(bg="#29272E")
+        self.root.geometry("1920x1080")  # Фиксированный размер окна
 
-        # Основной виджет
-        self.central_widget = QWidget(self)
-        self.setCentralWidget(self.central_widget)
+        self.image = None
+        self.processed_image = None
+        self.reflection_angle = 0
+        self.reflection_offset = 0
+        self.color_criterion = "all"  # "all", "black", "white", "red", "green", "blue"
 
-        # Основной макет (горизонтальный)
-        self.main_layout = QHBoxLayout(self.central_widget)
+        # Интерфейс
+        self.setup_ui()
 
-        # Левая часть: изображение и кнопки загрузки, сохранения, сброса
-        left_layout = QVBoxLayout()
+    def setup_ui(self):
+        # Основной фрейм для центрирования
+        frame_main = tk.Frame(self.root, bg="#29272E")
+        frame_main.pack(fill="both", expand=True, padx=20, pady=20)
 
-        # Метка для отображения изображения
-        self.image_label = QLabel("Изображение не загружено", self)
-        self.image_label.setStyleSheet("border-radius: 5px; background-color: #54505E;")
-        self.image_label.setAlignment(Qt.AlignCenter)
-        self.image_label.setFixedSize(500, 450)
-        left_layout.addWidget(self.image_label, alignment=Qt.AlignCenter)
+        # Фрейм для кнопок и ползунков
+        frame_controls = tk.Frame(frame_main, bg="#29272E", width=250)
+        frame_controls.pack(side="left", fill="y", padx=10)
 
-        # Кнопки загрузки, сохранения и сброса
-        buttons_layout = QHBoxLayout()
+        # Кнопка загрузки
+        self.load_button = tk.Button(
+            frame_controls, text="Загрузить картинку", bg="#4B0082", fg="white",
+            font=("Arial", 12, "bold"), command=self.load_image
+        )
+        self.load_button.pack(fill="x", pady=10)
 
-        self.load_button = QPushButton("Загрузить изображение", self)
-        self.load_button.setFixedSize(200, 60)
-        self.load_button.setStyleSheet('''
-            QPushButton {
-                background-color: #5109B6;
-                border-radius: 10px;
-                color: white;
-                font-size: 14px;
-            }
-            QPushButton:hover {
-                background-color: #6A1DB6;
-            }
-            QPushButton:pressed {
-                background-color: #400C8D;
-            }
-        ''')
-        self.load_button.clicked.connect(self.load_image)
-        buttons_layout.addWidget(self.load_button)
+        # Кнопка обработки
+        self.process_button = tk.Button(
+            frame_controls, text="Обработать", bg="#4B0082", fg="white",
+            font=("Arial", 12, "bold"), command=self.apply_reflection
+        )
+        self.process_button.pack(fill="x", pady=10)
 
-        self.save_button = QPushButton("Сохранить изображение", self)
-        self.save_button.setFixedSize(200, 60)
-        self.save_button.setStyleSheet('''
-            QPushButton {
-                background-color: #5109B6;
-                border-radius: 10px;
-                color: white;
-                font-size: 14px;
-            }
-            QPushButton:hover {
-                background-color: #6A1DB6;
-            }
-            QPushButton:pressed {
-                background-color: #400C8D;
-            }
-        ''')
-        self.save_button.clicked.connect(self.save_image)
-        buttons_layout.addWidget(self.save_button)
+        # Фрейм для ползунков и меню
+        frame_sliders = tk.Frame(frame_controls, bg="#1E1E2F")
+        frame_sliders.pack(fill="x", pady=10)
 
-        self.reset_button = QPushButton("Сбросить фильтры", self)
-        self.reset_button.setFixedSize(200, 60)
-        self.reset_button.setStyleSheet('''
-            QPushButton {
-                background-color: #5109B6;
-                border-radius: 10px;
-                color: white;
-                font-size: 14px;
-            }
-            QPushButton:hover {
-                background-color: #6A1DB6;
-            }
-            QPushButton:pressed {
-                background-color: #400C8D;
-            }
-        ''')
-        self.reset_button.clicked.connect(self.reset_filters)
-        buttons_layout.addWidget(self.reset_button)
+        # Ползунок угла
+        tk.Label(frame_sliders, text="Угол отражения (°):", bg="#1E1E2F", fg="white",
+                 font=("Arial", 12, "bold")).pack(anchor="w", padx=10)
+        self.angle_slider = tk.Scale(
+            frame_sliders, from_=0, to=360, orient="horizontal", bg="#4B0082", fg="white",
+            troughcolor="#2C2C3E", highlightthickness=0, command=self.update_reflection
+        )
+        self.angle_slider.set(0)
+        self.angle_slider.pack(fill="x", padx=10)
 
-        left_layout.addLayout(buttons_layout)
+        # Ползунок смещения
+        tk.Label(frame_sliders, text="Смещение линии:", bg="#1E1E2F", fg="white",
+                 font=("Arial", 12, "bold")).pack(anchor="w", padx=10)
+        self.offset_slider = tk.Scale(
+            frame_sliders, from_=-200, to=200, orient="horizontal", bg="#4B0082", fg="white",
+            troughcolor="#2C2C3E", highlightthickness=0, command=self.update_reflection
+        )
+        self.offset_slider.set(0)
+        self.offset_slider.pack(fill="x", padx=10)
 
-        self.main_layout.addLayout(left_layout)
+        # Выбор критерия отображения
+        tk.Label(frame_sliders, text="Признак отражения:", bg="#1E1E2F", fg="white",
+                 font=("Arial", 12, "bold")).pack(anchor="w", padx=10)
+        self.criterion_menu = tk.OptionMenu(
+            frame_sliders, tk.StringVar(value="Все цвета"), "Все цвета", "Черный", "Белый", "Красный", "Зеленый", "Синий", command=self.set_criterion
+        )
+        self.criterion_menu.config(bg="#4B0082", fg="white", font=("Arial", 12, "bold"))
+        self.criterion_menu.pack(fill="x", padx=10)
 
-        # Правая часть: Scroll Area с кнопками фильтров
-        self.scroll_area = QScrollArea(self)
-        self.scroll_area.setGeometry(550, 25, 250, 500)
-        self.scroll_area.setStyleSheet("""
-            QScrollArea {
-                background-color: #54505E;
-                border-radius: 10px;
-                border: 2px solid #333;
-            }
-            QScrollBar:vertical {
-                background: transparent;
-                width: 8px;
-                margin: 0px 0px 0px 0px;
-            }
-            QScrollBar::handle:vertical {
-                background: #B0B0B0;
-                border-radius: 4px;
-                min-height: 5px;
-            }
-            QScrollBar::groove{
-                background: transparent;
-            }
-            QScrollBar::handle:vertical:hover {
-                background: #C0C0C0;
-            }
-            QScrollBar::handle:vertical:pressed {
-                background: #A0A0A0;
-            }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
-                background: none;
-                border: none;
-                height: 0px;
-                width: 0px;
-            }
-        """)
-        self.scroll_area.setWidgetResizable(True)
+        # Фрейм для изображения и прокрутки
+        frame_canvas = tk.Frame(frame_main, bg="#1E1E2F")
+        frame_canvas.pack(side="right", fill="both", expand=True, padx=10)
 
-        # Контейнер для кнопок фильтров внутри Scroll Area
-        self.container_widget = QWidget()
-        self.container_layout = QVBoxLayout(self.container_widget)
-        self.container_layout.setSpacing(10)
-        self.container_layout.setContentsMargins(10, 10, 10, 10)
-        self.scroll_area.setWidget(self.container_widget)
+        # Создаем полосу прокрутки
+        self.canvas_scrollbar = tk.Scrollbar(frame_canvas, orient="vertical")
+        self.canvas_scrollbar.pack(side="right", fill="y")
 
-        # Стиль для кнопок фильтров
-        button_style = '''
-            QPushButton {
-                background-color: #5109B6;
-                border-radius: 8px;
-                color: white;
-                font-size: 14px;
-                padding: 10px;
-                text-align: left;
-            }
-            QPushButton:hover {
-                background-color: #6A1DB6;
-                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
-            }
-            QPushButton:pressed {
-                background-color: #400C8D;
-            }
-        '''
+        # Создаем Canvas для отображения изображения
+        self.image_canvas = tk.Canvas(frame_canvas, bg="gray", yscrollcommand=self.canvas_scrollbar.set)
+        self.image_canvas.pack(side="left", fill="both", expand=True)
 
-        # Список фильтров
-        self.filter_buttons = [
-            ("Черно-белый", self.apply_grayscale),
-            ("Инверсия", self.apply_invert_colors),
-            ("Рыбий глаз", self.apply_fish_eye),
-            ("Плывет", self.apply_chromatic_aberration),
-            ("Блюр", self.apply_blur),
-            ("Контраст", self.apply_increase_contrast),
-            ("Пиксели", self.apply_pixelation),
-            ("Сепия", self.apply_sepia),
-            ("Резкость", self.apply_sharpness),
-            ("Глитч", self.apply_glitch),
-            ("Рельеф", self.apply_emboss)
-        ]
-
-        # Добавление кнопок фильтров в контейнер
-        for name, func in self.filter_buttons:
-            button = QPushButton(name, self)
-            button.setFixedHeight(50)
-            button.setStyleSheet(button_style)
-            button.clicked.connect(func)
-            self.container_layout.addWidget(button)
-
-        self.container_layout.addStretch()  # Добавляет растяжение в конец макета
-
-        self.main_layout.addWidget(self.scroll_area)
-
-        # Хранение изображений
-        self.original_image = None
-        self.current_image = None
+        # Подключаем полосу прокрутки к Canvas
+        self.canvas_scrollbar.config(command=self.image_canvas.yview)
 
     def load_image(self):
         """Загрузка изображения."""
-        image_path, _ = QFileDialog.getOpenFileName(
-            self, "Open Image", "", "Images (*.png *.jpg *.jpeg *.bmp)"
-        )
-        if image_path:
-            self.original_image = Image.open(image_path).convert("RGB")
-            self.current_image = self.original_image.copy()
-            self.display_image(self.current_image)
+        file_path = filedialog.askopenfilename(filetypes=[("Image files", "*.png *.jpg *.jpeg *.bmp")])
+        if not file_path:
+            return
 
-    def save_image(self):
-        """Сохранение текущего изображения."""
-        if self.current_image:
-            save_path, _ = QFileDialog.getSaveFileName(
-                self, "Save Image", "", "Images (*.png *.jpg *.jpeg *.bmp)"
-            )
-            if save_path:
-                self.current_image.save(save_path)
-        else:
-            print("No image to save")
+        self.image = Image.open(file_path).convert("RGBA")
+        self.processed_image = self.image.copy()
+        self.display_image(self.processed_image)
+        self.update_reflection()
 
-    def reset_filters(self):
-        """Сброс фильтров до оригинального изображения."""
-        if self.original_image:
-            self.current_image = self.original_image.copy()
-            self.display_image(self.current_image)
+    def apply_reflection(self):
+        """Обработка изображения с отражением."""
+        if not self.image:
+            messagebox.showerror("Ошибка", "Сначала загрузите изображение!")
+            return
 
-    def display_image(self, image):
-        """Отображение изображения в интерфейсе."""
-        qimage = QImage(
-            image.tobytes(),
-            image.width,
-            image.height,
-            image.width * 3,
-            QImage.Format_RGB888
-        )
-        pixmap = QPixmap.fromImage(qimage)
-        self.image_label.setPixmap(
-            pixmap.scaled(
-                self.image_label.size(),
-                Qt.KeepAspectRatio,
-                Qt.SmoothTransformation
-            )
-        )
+        reflected_image = self.reflect_image()
+        self.processed_image = reflected_image
+        self.display_image(reflected_image)
 
-    # Фильтры
-    def apply_grayscale(self):
-        if self.current_image:
-            np_image = np.array(self.current_image)
-            gray_image = np.dot(np_image[..., :3], [0.299, 0.587, 0.114]).astype(np.uint8)
-            self.current_image = Image.fromarray(gray_image, mode="L").convert("RGB")
-            self.display_image(self.current_image)
+    def reflect_image(self):
+        """Функция для создания отражения изображения."""
+        img = self.image.copy()
+        angle_rad = math.radians(self.reflection_angle)
+        center_x = img.width // 2 + self.reflection_offset
+        center_y = img.height // 2
 
-    def apply_invert_colors(self):
-        if self.current_image:
-            np_image = np.array(self.current_image)
-            inverted_image = 255 - np_image
-            self.current_image = Image.fromarray(inverted_image)
-            self.display_image(self.current_image)
+        pixels = img.load()
+        width, height = img.size
 
-    def apply_fish_eye(self):
-        if self.current_image:
-            np_image = np.array(self.current_image)
-            h, w, _ = np_image.shape
-            y, x = np.indices((h, w))
-            x_center, y_center = w / 2, h / 2
-            x_new = x - x_center
-            y_new = y - y_center
-            r = np.sqrt(x_new**2 + y_new**2)
-            r_max = np.max(r)
-            # Логарифмическое искажение
-            x_new = x_center + x_new * np.log(r + 1) / np.log(r_max + 1)
-            y_new = y_center + y_new * np.log(r + 1) / np.log(r_max + 1)
-            coords = np.stack([y_new.ravel(), x_new.ravel()], axis=-1).round().astype(int)
-            coords = np.clip(coords, 0, [h - 1, w - 1])
-            fish_eye_image = np_image[coords[:, 0], coords[:, 1]].reshape((h, w, -1))
-            self.current_image = Image.fromarray(fish_eye_image)
-            self.display_image(self.current_image)
+        # Итерация по пикселям и создание отражения
+        for y in range(height):
+            for x in range(width):
+                original_color = pixels[x, y]
+                # Проверка критерия цвета
+                if not self.check_color(original_color):
+                    continue
 
-    def apply_chromatic_aberration(self):
-        """Эффект смешанного искажения."""
-        if self.current_image:
-            # Преобразуем изображение в массив NumPy
-            np_image = np.array(self.current_image)
-            h, w, c = np_image.shape
+                # Определяем расстояние до линии
+                rx, ry = x - center_x, y - center_y
+                distance = rx * math.cos(angle_rad) + ry * math.sin(angle_rad)
 
-            # Создаем сетку координат
-            y, x = np.meshgrid(np.arange(h), np.arange(w), indexing="ij")
+                # Вычисляем отражённые координаты
+                ref_x = int(x - 2 * distance * math.cos(angle_rad))
+                ref_y = int(y - 2 * distance * math.sin(angle_rad))
 
-            # Создаем случайные искажения
-            distortion_x = np.sin(y / 20) * 10  # Волновое искажение по оси X
-            distortion_y = np.cos(x / 20) * 10  # Волновое искажение по оси Y
+                # Если координаты в пределах изображения
+                if 0 <= ref_x < width and 0 <= ref_y < height:
+                    if distance > 0:  # Отражение происходит только на одной стороне линии
+                        pixels[x, y] = img.getpixel((ref_x, ref_y))
 
+        # Рисуем перпендикулярную линию на изображении
+        draw = ImageDraw.Draw(img)
+        line_length = max(width, height)
 
+        # Вычисляем перпендикуляр к линии отражения
+        perp_angle_rad = angle_rad + math.pi / 2
+        x1 = center_x - line_length * math.cos(perp_angle_rad)
+        y1 = center_y - line_length * math.sin(perp_angle_rad)
+        x2 = center_x + line_length * math.cos(perp_angle_rad)
+        y2 = center_y + line_length * math.sin(perp_angle_rad)
 
-            # Применяем искажения к координатам
-            new_x = np.clip(x + distortion_x.astype(np.int32), 0, w - 1)
-            new_y = np.clip(y + distortion_y.astype(np.int32), 0, h - 1)
+        draw.line([(x1, y1), (x2, y2)], fill="red", width=3)
 
-            # Перемешиваем пиксели изображения
-            distorted_image = np_image[new_y, new_x]
+        return img
 
-            # Преобразуем результат обратно в изображение
-            self.current_image = Image.fromarray(distorted_image)
-            self.display_image(self.current_image)
+    def check_color(self, color):
+        """Проверяет, соответствует ли цвет критерию."""
+        r, g, b, a = color  # RGBA
+        if self.color_criterion == "Черный":
+            return r < 50 and g < 50 and b < 50  # Очень темные цвета
+        elif self.color_criterion == "Белый":
+            return r > 200 and g > 200 and b > 200  # Очень светлые цвета
+        elif self.color_criterion == "Красный":
+            return r > g and r > b  # Красные пиксели
+        elif self.color_criterion == "Зеленый":
+            return g > r and g > b  # Зеленые пиксели
+        elif self.color_criterion == "Синий":
+            return b > r and b > g  # Синие пиксели
+        return True  # Если критерий - все цвета ("all")
 
-    def apply_blur(self):
-        if self.current_image:
-            self.current_image = self.current_image.filter(ImageFilter.GaussianBlur(5))
-            self.display_image(self.current_image)
+    def set_criterion(self, value):
+        """Устанавливает критерий отображения."""
+        self.color_criterion = value
+        self.update_reflection()
 
-    def apply_sepia(self):
-        if self.current_image:
-            np_image = np.array(self.current_image)
-            tr = 0.393 * np_image[..., 0] + 0.769 * np_image[..., 1] + 0.189 * np_image[..., 2]
-            tg = 0.349 * np_image[..., 0] + 0.686 * np_image[..., 1] + 0.168 * np_image[..., 2]
-            tb = 0.272 * np_image[..., 0] + 0.534 * np_image[..., 1] + 0.131 * np_image[..., 2]
-            np_image[..., 0] = np.clip(tr, 0, 255)
-            np_image[..., 1] = np.clip(tg, 0, 255)
-            np_image[..., 2] = np.clip(tb, 0, 255)
-            self.current_image = Image.fromarray(np_image)
-            self.display_image(self.current_image)
+    def update_reflection(self, _=None):
+        """Обновление линии в реальном времени."""
+        if not self.image:
+            return
 
-    def apply_increase_contrast(self):
-        if self.current_image:
-            enhancer = ImageEnhance.Contrast(self.current_image)
-            self.current_image = enhancer.enhance(2.0)
-            self.display_image(self.current_image)
+        # Обновляем угол и смещение
+        self.reflection_angle = self.angle_slider.get()
+        self.reflection_offset = self.offset_slider.get()
 
-    def apply_pixelation(self, pixel_size=10):
-        """Применение фильтра пикселизации."""
-        if self.original_image:
-            np_image = np.array(self.original_image)
-            h, w, _ = np_image.shape
+        # Рисуем перпендикулярную линию
+        img = self.image.copy()
+        draw = ImageDraw.Draw(img)
+        angle_rad = math.radians(self.reflection_angle)
+        center_x = img.width // 2 + self.reflection_offset
+        center_y = img.height // 2
+        line_length = max(img.width, img.height)
 
-            # Проверка, чтобы размер пикселей не превышал размеры изображения
-            pixel_size = 10
+        # Перпендикулярная линия
+        perp_angle_rad = angle_rad + math.pi / 2
+        x1 = center_x - line_length * math.cos(perp_angle_rad)
+        y1 = center_y - line_length * math.sin(perp_angle_rad)
+        x2 = center_x + line_length * math.cos(perp_angle_rad)
+        y2 = center_y + line_length * math.sin(perp_angle_rad)
+        draw.line([(x1, y1), (x2, y2)], fill="red", width=3)
 
-            # Уменьшаем изображение, создавая эффект пикселизации
-            small_h, small_w = h // pixel_size, w // pixel_size
-            small_image = np_image[:small_h * pixel_size, :small_w * pixel_size]
-            small_image = small_image.reshape(small_h, pixel_size, small_w, pixel_size, 3).mean(axis=(1, 3)).astype(
-                np.uint8)
+        self.display_image(img)
 
-            # Увеличиваем изображение обратно
-            pixelated_image = np.kron(small_image, np.ones((pixel_size, pixel_size, 1), dtype=np.uint8))
+    def display_image(self, img):
+        """Отображение изображения на Canvas."""
+        img_width, img_height = img.size
 
-            # Создаем новое изображение
-            self.current_image = Image.fromarray(pixelated_image[:h, :w, :])
-            self.display_image(self.current_image)
+        # Устанавливаем размер canvas, если изображение больше
+        self.image_canvas.config(scrollregion=(0, 0, img_width, img_height))
 
-    def apply_sharpness(self):
-        if self.current_image:
-            enhancer = ImageEnhance.Sharpness(self.current_image)
-            self.current_image = enhancer.enhance(10.0)
-            self.display_image(self.current_image)
-
-    def apply_emboss(self):
-        """Рельефный эффект."""
-        if self.current_image:
-            try:
-                np_image = np.array(self.current_image, dtype=np.float32)
-                kernel = np.array([[0, -4, 0],
-                                   [-1, 7, -1],
-                                   [0, -1, 0]])
-
-                # Применяем фильтр свертки для рельефа
-                from scipy.signal import convolve2d
-                gray_image = np.dot(np_image[..., :3], [0.299, 0.587, 0.114])
-                embossed_image = convolve2d(gray_image, kernel, mode='same', boundary='wrap')
-                embossed_image = np.clip(embossed_image + 128, 0, 255).astype(np.uint8)
-                self.current_image = Image.fromarray(embossed_image, mode="L").convert("RGB")
-                self.display_image(self.current_image)
-            except Exception as e:
-                print(f"Ошибка при применении рельефа: {e}")
-
-    def apply_glitch(self):
-        """Глич-эффект с разрезами и сдвигами."""
-        if self.current_image:
-            # Преобразуем изображение в массив NumPy
-            np_image = np.array(self.current_image)
-            h, w, _ = np_image.shape
-
-            # Сдвигаем цветовые каналы
-            r_shift = np.roll(np_image[..., 0], shift=10, axis=1)
-            g_shift = np.roll(np_image[..., 1], shift=-10, axis=0)
-            b_shift = np.roll(np_image[..., 2], shift=5, axis=1)
-
-            # Собираем каналы с искажениями
-            glitched_image = np.stack([r_shift, g_shift, b_shift], axis=-1)
-
-            # Разрезаем изображение на полосы
-            num_slices = 10  # Количество разрезов
-            slice_height = h // num_slices  # Высота одной полосы
-
-            for i in range(num_slices):
-                # Вычисляем координаты текущей полосы
-                y_start = i * slice_height
-                y_end = (i + 1) * slice_height if i != num_slices - 1 else h
-
-                # Сдвиг полосы на случайное значение влево или вправо
-                shift = np.random.randint(-20, 20)
-                glitched_image[y_start:y_end] = np.roll(glitched_image[y_start:y_end], shift=shift, axis=1)
-
-            # Конвертируем обратно в изображение и отображаем
-            self.current_image = Image.fromarray(glitched_image)
-            self.display_image(self.current_image)
-
-    def apply_vintage(self):
-        """Старинный стиль."""
-        if self.current_image:
-            np_image = np.array(self.current_image)
-            vintage_filter = np.array([0.9, 0.7, 0.4])
-            np_image = np.clip(np_image * vintage_filter, 0, 255)
-            self.current_image = Image.fromarray(np_image.astype(np.uint8))
-            self.display_image(self.current_image)
+        img_tk = ImageTk.PhotoImage(img)
+        self.image_canvas.create_image(0, 0, anchor="nw", image=img_tk)
+        self.image_canvas.image = img_tk  # Сохраняем ссылку на изображение
 
 
+# Запуск приложения
 if __name__ == "__main__":
-    app = QApplication(sys.argv)
-    main_window = ImageLoaderApp()
-    main_window.show()
-    sys.exit(app.exec_())
+    root = tk.Tk()
+    app = ImageReflectionApp(root)
+    root.mainloop()
