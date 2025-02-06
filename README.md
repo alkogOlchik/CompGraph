@@ -4,6 +4,8 @@
 
 ## 2. Отражение
 
+Программа для отражения изображений относительно линии
+
 https://github.com/user-attachments/assets/5ed282a4-eae1-4ce6-a8f4-b3aacef3b997
 
 ## 3. Фильтры
